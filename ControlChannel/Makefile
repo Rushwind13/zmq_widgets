@@ -1,10 +1,8 @@
 # loiosh
-#HOMEDIR = /Users/jimbo
+HOMEDIR = /Users/jimbo
 # work
 #HOMEDIR = /Users/i859240
-# stem
-HOMEDIR = /Users/kristi
-BASEDIR = $(HOMEDIR)/Documents/jimbo/Dev
+BASEDIR = $(HOMEDIR)/Documents/code
 OUTPUTDIR = ../bin
 CC = g++
 CC_FLAGS = -w -I/usr/local/include
