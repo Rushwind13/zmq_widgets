@@ -1,12 +1,14 @@
 # loiosh
-HOMEDIR = /Users/jimbo
+#HOMEDIR = /Users/jimbo
 # work
 #HOMEDIR = /Users/i859240
-BASEDIR = $(HOMEDIR)/Documents/code
+# stem
+HOMEDIR = /Users/kristi
+BASEDIR = $(HOMEDIR)/Documents/jimbo/Dev
 OUTPUTDIR = ../bin
 CC = g++
-CC_FLAGS = -w 
-LD_FLAGS = -lzmq
+CC_FLAGS = -w -I/usr/local/include
+LD_FLAGS = -L/usr/local/lib -L$(OUTPUTDIR) -lWidget -lzmq
 
 EXEC = $(OUTPUTDIR)/$(notdir $(CURDIR:%/=%))
 SOURCES = $(wildcard src/*.cpp)
