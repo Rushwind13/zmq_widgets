@@ -17,6 +17,19 @@
 void Widget::setup( const char *hint = "connect" )
 {
 	int rc = 0;
+	// Record start timestamps
+	start_tp = std::chrono::steady_clock::now();
+	start_wall = std::time(nullptr);
+	{
+		char buf[64];
+		std::tm* tm_info = std::localtime(&start_wall);
+		if (tm_info) {
+			std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %Z", tm_info);
+			std::cout << "[TIMING] START " << buf << std::endl;
+		} else {
+			std::cout << "[TIMING] START epoch " << static_cast<long long>(start_wall) << std::endl;
+		}
+	}
 	// start logging
 	// create context (catch exception)
 	// if sub_endpoint, create a SUB socket(catch exception)
@@ -26,7 +39,7 @@ void Widget::setup( const char *hint = "connect" )
 		subscriber->setsockopt( ZMQ_SUBSCRIBE, subscription, strlen(subscription) );
 
 		// set SUB to connect if hinted, else bind
-		if( strcmp(hint, "connect") == 0)
+		if( connect_sub )
 		{
 			subscriber->connect( sub_endpoint );
 			std::cout << "Connect to " << sub_endpoint << std::endl;
@@ -44,7 +57,7 @@ void Widget::setup( const char *hint = "connect" )
 		publisher = new zmq::socket_t( *context, ZMQ_PUB );
 
 		// set PUB to connect if hinted, else bind (note: same as above?)
-		if( strcmp(hint, "connect") == 0)
+		if( connect_pub )
 		{
 			publisher->connect( pub_endpoint );
 			std::cout << "Connect to " << pub_endpoint << std::endl;
@@ -165,7 +178,7 @@ void Widget::sendMessage( void *message, int length )
 	sendPart( message, length, 0 );
 }/**/
 
-void Widget::sendMessage( msgpack::sbuffer *header, msgpack::sbuffer *payload, char *pub )
+void Widget::sendMessage( msgpack::sbuffer *header, msgpack::sbuffer *payload, char *pub, zmq::socket_t *out_socket)
 {
 	if( pub == NULL )
 	{
@@ -175,11 +188,16 @@ void Widget::sendMessage( msgpack::sbuffer *header, msgpack::sbuffer *payload, c
 	{
 		std::cout << pub << std::endl;
 	}/**/
+
+    if( out_socket == NULL )
+    {
+        out_socket = publisher;
+    }
 	// First, send the subscription envelope (don't send via sendPart, which leads with a strlen segment)
-	publisher->send( pub, strlen(pub), ZMQ_SNDMORE );
+	out_socket->send( pub, strlen(pub), ZMQ_SNDMORE );
 	// then send the header payload. This could be multi-part if desired.
-	sendPart( header, ZMQ_SNDMORE );
-	sendPart( payload, 0 );
+	sendPart( header, ZMQ_SNDMORE, out_socket );
+	sendPart( payload, 0, out_socket );
 }
 
 /*void Widget::sendPart( void *part, int length, int more )
@@ -199,14 +217,18 @@ void Widget::sendPart( char *part, int more )
 	zmq_send(publisher, part, len_part, more);/**/
 }
 
-void Widget::sendPart( msgpack::sbuffer *part, int more )
+void Widget::sendPart( msgpack::sbuffer *part, int more, zmq::socket_t *out_socket)
 {
 	zmq::message_t outbound(part->size());
 
 	// Convert msgpack::sbuffer to zmq::message_t
 	memcpy( outbound.data(), part->data(), part->size() );
 
-	publisher->send( outbound, more );
+    if( out_socket == NULL )
+    {
+        out_socket = publisher;
+    }
+	out_socket->send( outbound, more );
 }
 
 /*
@@ -232,21 +254,49 @@ void Widget::shutdown()
 	//LOGGER_INFO << "Exiting Scatter Proxy";
 	local_shutdown();
 
+	// Record stop timestamps and elapsed
+	auto stop_tp = std::chrono::steady_clock::now();
+	auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(stop_tp - start_tp).count();
+	std::time_t stop_wall = std::time(nullptr);
+	{
+		char buf[64];
+		std::tm* tm_info = std::localtime(&stop_wall);
+		if (tm_info) {
+			std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %Z", tm_info);
+			std::cout << "[TIMING] STOP  " << buf << " (elapsed " << (elapsed/1000.0) << "s)" << std::endl;
+		} else {
+			std::cout << "[TIMING] STOP epoch " << static_cast<long long>(stop_wall)
+					  << " (elapsed " << (elapsed/1000.0) << "s)" << std::endl;
+		}
+	}
+
+	// Ensure sockets do not linger during shutdown
+	int linger = 0;
 	if( subscriber != NULL )
 	{
-		subscriber->close();
+		try {
+			subscriber->setsockopt(ZMQ_LINGER, &linger, sizeof(linger));
+			subscriber->close();
+		} catch(...) { /* swallow close errors */ }
 		subscriber = NULL;
 	}
 
 	if( publisher != NULL )
 	{
-		publisher->close();
+		try {
+			publisher->setsockopt(ZMQ_LINGER, &linger, sizeof(linger));
+			publisher->close();
+		} catch(...) { /* swallow close errors */ }
 		publisher = NULL;
 	}
 
 	running = false;
-	context->close();
-	context = NULL;
+	if (context != NULL) {
+		try {
+			context->close();
+		} catch(...) { /* swallow close errors */ }
+		context = NULL;
+	}
 	// stop logging
 }
 

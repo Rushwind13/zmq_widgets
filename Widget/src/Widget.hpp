@@ -13,6 +13,8 @@
 #include <string>
 #include <sstream> //for std::stringstream
 #include <vector>
+#include <chrono>
+#include <ctime>
 
 typedef std::vector<unsigned char> byte_vector;
 template<class T>
@@ -29,7 +31,7 @@ static inline std::string to_string( T i )
 class Widget
 {
 public:
-	Widget( char *_name, char *_subscription, char *_sub_endpoint, char *_publication, char *_pub_endpoint )
+	Widget( char *_name, char *_subscription, char *_sub_endpoint, char *_publication, char *_pub_endpoint, bool _connect_sub = false, bool _connect_pub=false )
 	{
 		strcpy( name, _name );
 		strcpy( subscription, _subscription );
@@ -39,10 +41,21 @@ public:
 		context = new zmq::context_t(1);
 		assert(context);
 		running = true;
+		connect_pub = _connect_pub;
+		connect_sub = _connect_sub;
+		subscriber = NULL;
+		publisher = NULL;
+    	printf("Widget constructor %d %d\n", connect_pub, connect_sub);
 	}
 	virtual ~Widget(){};
 
 	int run();
+
+	// Connection mode overrides (use before run())
+	void forceBindSubscriber() { connect_sub = false; }
+	void forceConnectSubscriber() { connect_sub = true; }
+	void forceBindPublisher() { connect_pub = false; }
+	void forceConnectPublisher() { connect_pub = true; }
 
 protected:
 	virtual void local_setup() = 0;
@@ -54,7 +67,7 @@ protected:
 	}
 	//void sendMessage( void *message, int length );
 	//void sendMessage( void *accumulator, int accum_length, void *payload, int pay_length );
-	void sendMessage( msgpack::sbuffer *header, msgpack::sbuffer *payload, char *pub = NULL );
+	void sendMessage( msgpack::sbuffer *header, msgpack::sbuffer *payload, char *pub = NULL, zmq::socket_t *out_socket = NULL );
 	void unPackPart( const msgpack::sbuffer *in, msgpack::object *out );
 
 private:
@@ -64,7 +77,7 @@ private:
 
 	void receiveMessage( msgpack::sbuffer *header, msgpack::sbuffer *payload );
 	void receivePart( msgpack::sbuffer *part, const char *tag = NULL );
-	void sendPart( msgpack::sbuffer *part, int more = 0 ); // used for header data, default to "no more coming"
+	void sendPart( msgpack::sbuffer *part, int more = 0, zmq::socket_t *out_socket = NULL ); // used for header data, default to "no more coming"
 	void sendPart( char *part, int more = ZMQ_SNDMORE ); // used for envelopes, so default to "more coming"
 	void sendPart( void *part, int length, int more = 0 ); // used for header data, so default to "more coming"
 
@@ -75,6 +88,8 @@ protected:
 	char publication[255];
 	char pub_endpoint[255];
 	bool running = false;
+	bool connect_sub = false;
+	bool connect_pub = false;
 
 	// ZMQ bits
 	zmq::context_t *context;
@@ -84,6 +99,10 @@ protected:
 private:
 	msgpack::sbuffer header;
 	msgpack::sbuffer payload;
+
+	// Timing
+	std::chrono::steady_clock::time_point start_tp;
+	std::time_t start_wall = 0;
 };
 
 	/*
@@ -235,4 +254,3 @@ class Widget:
 	 */
 
 #endif /* WIDGET_HPP_ */
-

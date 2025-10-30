@@ -2,8 +2,12 @@
 // Name        : ControlChannel.cpp
 // Author      : VT
 // Version     :
-// Copyright   : Copyright 2014 Jimbo S. Harris. All Rights Reserved.
-// Description : Passthru PUB/SUB proxy
+// Copyright   : Copyright 2014-2025 Jimbo S. Harris. All Rights Reserved.
+// Description : Tiny XPUB/XSUB proxy (multi-publisher, multi-subscriber bus)
+//               Binds XSUB (inbound from publishers) and XPUB (outbound to subscribers)
+//               Default ports:
+//                 - XSUB bind: tcp://127.0.0.1:1314 (publishers connect here)
+//                 - XPUB bind: tcp://127.0.0.1:1313 (subscribers connect here)
 //============================================================================
 
 #include <iostream>
@@ -11,59 +15,36 @@ using namespace std;
 #include <zmq.h>
 #include <assert.h>
 
-void ControlChannel()
+int main(int argc, char** argv)
 {
-	void *subscriber;
-	void *publisher;
-	void *capture = NULL;
+	const char* xsub_addr = (argc > 1) ? argv[1] : "tcp://127.0.0.1:1314"; // inbound from publishers
+	const char* xpub_addr = (argc > 2) ? argv[2] : "tcp://127.0.0.1:1313";  // outbound to subscribers
 
-	std::string in_port = "ipc:///tmp/feeds/control";
-	std::string out_port = "ipc:///tmp/feeds/broadcast";
-
-	int rc = 0;
 	void *context = zmq_ctx_new();
+	assert(context);
 
-	std::cout << "Starting Control Channel Proxy between " << in_port << " and " << out_port << std::endl;
+	void *xsub = zmq_socket(context, ZMQ_XSUB);
+	assert(xsub);
+	int rc = zmq_bind(xsub, xsub_addr);
+	assert(rc == 0);
 
-	// IN port initialization
-	subscriber = zmq_socket(context, ZMQ_SUB);
-	assert( subscriber );
+	void *xpub = zmq_socket(context, ZMQ_XPUB);
+	assert(xpub);
+	int verbose = 0; // set to 1 for subscription messages
+	zmq_setsockopt(xpub, ZMQ_XPUB_VERBOSE, &verbose, sizeof(verbose));
+	rc = zmq_bind(xpub, xpub_addr);
+	assert(rc == 0);
 
-	rc = zmq_setsockopt( subscriber, ZMQ_SUBSCRIBE, "", 0);
-	assert( rc == 0 );
+	std::cout << "Starting XPUB/XSUB proxy\n  XSUB (inbound from publishers): " << xsub_addr
+			  << "\n  XPUB (outbound to subscribers): " << xpub_addr << std::endl;
 
-	rc = zmq_bind( subscriber, in_port.c_str() );
-	assert( rc == 0 );
+	// This will block until terminated
+	zmq_proxy(xsub, xpub, NULL);
 
-	// from https://zeromq.jira.com/browse/LIBZMQ-270
-	// to fix problem of first message never gets through
-	zmq_pollitem_t pollitems [] = {
-	{ subscriber, 0, ZMQ_POLLIN, 0 }
-	};
-	zmq_poll (pollitems, 1, 1);
-
-	// OUT port initialization
-	publisher = zmq_socket(context, ZMQ_PUB);
-	assert( publisher );
-
-	rc = zmq_bind( publisher, out_port.c_str() );
-	assert( rc == 0 );
-
-	zmq_proxy( subscriber, publisher, capture );
-
-	// only gets here at shutdown time
-	std::cout << "Exiting Control Channel Proxy" << std::endl;
-
-	zmq_close(subscriber);
-	subscriber = NULL;
-
-	zmq_close(publisher);
-	publisher = NULL;
-}
-
-int main()
-{
-	ControlChannel();
+	// Shutdown
+	std::cout << "Exiting XPUB/XSUB proxy" << std::endl;
+	zmq_close(xsub);
+	zmq_close(xpub);
+	zmq_ctx_term(context);
 	return 0;
 }
-
